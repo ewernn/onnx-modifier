@@ -1,4 +1,3 @@
-
 /* eslint "no-global-assign": ["error", {"exceptions": [ "TextDecoder", "TextEncoder", "URLSearchParams" ] } ] */
 /* global view */
 
@@ -335,7 +334,7 @@ host.BrowserHost = class {
                     var form = new FormData();
                     form.append('file', file);
 
-                    // https://stackoverflow.com/questions/66039996/javascript-fetch-upload-files-to-python-flask-restful
+                    // First send to backend and wait for completion
                     fetch('/open_model', {
                         method: 'POST',
                         body: form
@@ -343,15 +342,15 @@ host.BrowserHost = class {
                         return response.text();
                     }).then(function (text) {
                         console.log('POST response: ');
-                        // Should be 'OK' if everything was successful
                         console.log(text);
-                    });
-
-
-                    if (file) {
+                        // Only open the file in UI after backend processing is complete
                         this._open(file, files);
                         this._view.modifier.clearGraph();
-                    }
+                    }.bind(this))  // Need to bind 'this' to access _open
+                    .catch(function(error) {
+                        console.error('Error:', error);
+                        swal("Error!", "Failed to process model", "error");
+                    });
                 }
             });
         }
@@ -740,7 +739,7 @@ host.BrowserHost = class {
             self._view.show('default');
         };
         this.window.addEventListener('keydown', eventHandler);
-        this.document.body.addEventListener('click', eventHandler);
+        this.window.addEventListener('click', eventHandler);
         this._view.show('about');
     }
 
