@@ -503,3 +503,18 @@ class onnxModifier:
         input_name = inference_session.get_inputs()[0].name
         outs = inference_session.run(output_names, {input_name: x})
         return outs
+
+    def fix_pooling_pads(self):
+        """Automatically fix padding attributes of pooling layers to have exactly 4 values."""
+        modified = False
+        for node in self.graph.node:
+            if node.op_type in ['MaxPool', 'AveragePool']:
+                for attr in node.attribute:
+                    if attr.name == 'pads':
+                        if len(attr.ints) > 4:
+                            print(f"Fixing {node.op_type} padding from {len(attr.ints)} values to 4")
+                            # Keep only first 4 padding values
+                            new_pads = attr.ints[:4]
+                            attr.ints[:] = new_pads
+                            modified = True
+        return modified

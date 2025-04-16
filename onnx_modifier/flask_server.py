@@ -19,6 +19,10 @@ def open_model():
     global onnx_modifier
     onnx_modifier = onnxModifier.from_name_protobuf_stream(
                                     onnx_file.filename, onnx_file.stream)
+    
+    # Automatically fix pooling pads when loading
+    if onnx_modifier.fix_pooling_pads():
+        print("Fixed pooling layer paddings automatically")
 
     return 'OK', 200
 
