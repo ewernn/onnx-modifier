@@ -13,16 +13,19 @@ def index():
 
 @app.route('/open_model', methods=['POST'])
 def open_model():
-    # https://blog.miguelgrinberg.com/post/handling-file-uploads-with-flask
+    print("DEBUGGING: open_model route was called!")
     onnx_file = request.files['file']
 
     global onnx_modifier
+    print("DEBUGGING: About to create onnx_modifier")
     onnx_modifier = onnxModifier.from_name_protobuf_stream(
                                     onnx_file.filename, onnx_file.stream)
     
+    print("DEBUGGING: About to call fix_pooling_pads")
     # Automatically fix pooling pads when loading
     if onnx_modifier.fix_pooling_pads():
         print("Fixed pooling layer paddings automatically")
+    print("DEBUGGING: Finished fix_pooling_pads")
 
     return 'OK', 200
 
@@ -33,6 +36,11 @@ def modify_and_download_model():
     global onnx_modifier
     onnx_modifier.reload()   # allow downloading for multiple times
     onnx_modifier.modify(modify_info)
+    
+    # Add padding fix just before saving
+    if onnx_modifier.fix_pooling_pads():
+        print("Fixed pooling layer paddings automatically")
+        
     save_path = onnx_modifier.check_and_save_model()
 
     return save_path

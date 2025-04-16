@@ -318,7 +318,7 @@ class onnxModifier:
             else:
                 self.graph.value_info.append(info)
 
-        # recover the original ouptuts, to avoid output missing due to unperfect shape inference
+        # recover the original ouptuts, to avoid output shape mismatch if users change the input size
         # TODO: this workaround can cause output shape mismatch if users change the input size
         if len(self.graph.output) < orig_output_num:
             self.graph.output.extend(orig_output_info)
@@ -505,21 +505,18 @@ class onnxModifier:
         return outs
 
     def fix_pooling_pads(self):
+        print("DEBUGGING: fix_pooling_pads function was called!")
         """Automatically fix padding attributes of pooling layers to have exactly 4 values."""
         modified = False
-        print("Starting fix_pooling_pads...")
-        # Fix both the working copy and the backup
         for model in [self.model_proto, self.model_proto_backup]:
             for node in model.graph.node:
                 if node.op_type in ['MaxPool', 'AveragePool']:
                     print(f"Found {node.op_type} node")
                     for attr in node.attribute:
-                        print(f"  Attribute: {attr.name}")
                         if attr.name == 'pads':
-                            print(f"    Current pads length: {len(attr.ints)}")
-                            print(f"    Current pads values: {list(attr.ints)}")
+                            print(f"Found pads attribute with {len(attr.ints)} values")
                             if len(attr.ints) > 4:
-                                print(f"    Fixing {node.op_type} padding from {len(attr.ints)} values to 4")
+                                print(f"Fixing {node.op_type} padding from {len(attr.ints)} values to 4")
                                 new_pads = attr.ints[:4]
                                 attr.ints[:] = new_pads
                                 modified = True

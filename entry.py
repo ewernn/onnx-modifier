@@ -5,6 +5,8 @@ MODE = "LAUNCH_SERVER"
 assert MODE in ["LAUNCH_SERVER", "BUILD_EXE"]
 
 if MODE == "LAUNCH_SERVER":
+    import sys
+    sys.argv.extend(['--debug', 'True'])  # Enable debug mode
     launch_flask_server()
 else:
     build_desktop_app()
