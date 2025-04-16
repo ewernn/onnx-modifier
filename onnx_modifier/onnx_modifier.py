@@ -507,15 +507,19 @@ class onnxModifier:
     def fix_pooling_pads(self):
         """Automatically fix padding attributes of pooling layers to have exactly 4 values."""
         modified = False
+        print("Starting fix_pooling_pads...")
         # Fix both the working copy and the backup
         for model in [self.model_proto, self.model_proto_backup]:
             for node in model.graph.node:
                 if node.op_type in ['MaxPool', 'AveragePool']:
+                    print(f"Found {node.op_type} node")
                     for attr in node.attribute:
+                        print(f"  Attribute: {attr.name}")
                         if attr.name == 'pads':
+                            print(f"    Current pads length: {len(attr.ints)}")
+                            print(f"    Current pads values: {list(attr.ints)}")
                             if len(attr.ints) > 4:
-                                print(f"Fixing {node.op_type} padding from {len(attr.ints)} values to 4")
-                                # Keep only first 4 padding values
+                                print(f"    Fixing {node.op_type} padding from {len(attr.ints)} values to 4")
                                 new_pads = attr.ints[:4]
                                 attr.ints[:] = new_pads
                                 modified = True
