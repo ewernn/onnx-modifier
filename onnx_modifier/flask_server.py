@@ -23,11 +23,11 @@ def open_model():
     
     print("DEBUGGING: About to call fix_pooling_pads")
     # Automatically fix pooling pads when loading
-    if onnx_modifier.fix_pooling_pads():
+    was_modified = onnx_modifier.fix_pooling_pads()
+    if was_modified:
         print("Fixed pooling layer paddings automatically")
-    print("DEBUGGING: Finished fix_pooling_pads")
-
-    return 'OK', 200
+    
+    return {'status': 'OK', 'modified': was_modified}, 200
 
 @app.route('/download', methods=['POST'])
 def modify_and_download_model():

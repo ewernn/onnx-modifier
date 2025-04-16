@@ -339,13 +339,14 @@ host.BrowserHost = class {
                         method: 'POST',
                         body: form
                     }).then(function (response) {
-                        return response.text();
-                    }).then(function (text) {
-                        console.log('POST response: ');
-                        console.log(text);
-                        // Only open the file in UI after backend processing is complete
-                        this._open(file, files);
-                        this._view.modifier.clearGraph();
+                        return response.json();  // Parse JSON response
+                    }).then((data) => {
+                        console.log('POST response: ', data);
+                        if (data.status === 'OK') {
+                            // Only open the file in UI after backend processing is complete
+                            this._open(file, files);
+                            this._view.modifier.clearGraph();
+                        }
                     }.bind(this))  // Need to bind 'this' to access _open
                     .catch(function(error) {
                         console.error('Error:', error);
@@ -389,16 +390,19 @@ host.BrowserHost = class {
                     method: 'POST',
                     body: form
                 }).then(function (response) {
-                    return response.text();
-                }).then(function (text) {
-                    console.log('POST response: ');
-                    // Should be 'OK' if everything was successful
-                    console.log(text);
+                    return response.json();  // Parse JSON response
+                }).then((data) => {
+                    console.log('POST response: ', data);
+                    if (data.status === 'OK') {
+                        // Only open the file in UI after backend processing is complete
+                        this._open(file, files);
+                        this._view.modifier.clearGraph();
+                    }
+                }.bind(this))  // Need to bind 'this' to access _open
+                .catch(function(error) {
+                    console.error('Error:', error);
+                    swal("Error!", "Failed to process model", "error");
                 });
-                if (file) {
-                    this._open(file, files);
-                    this._view.modifier.clearGraph();
-                }
             }
         });
 
