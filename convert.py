@@ -100,9 +100,9 @@ def create_squeezed_version(model_path):
 
 def main():
     # Get the current working directory
-    base_dir = os.getcwd()
+    # base_dir = os.getcwd()
+    base_dir = '/home/ewern/cntk_models'
     logger.info(f"Working directory: {base_dir}")
-    logger.info(f"Working directory: {'/home/ewern/cntk_models'}")
     
     # List of models to convert
     models = [
