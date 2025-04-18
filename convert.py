@@ -8,33 +8,43 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def convert_to_onnx(model_path):
-    """Convert a CNTK model to ONNX format."""
+    """Convert a CNTK model to ONNX format with explicit softmax pruning check."""
     model_name = os.path.basename(model_path)
     onnx_path = f"{model_path}.onnx"
     
-    logger.info(f"Converting {model_name} to ONNX...")
+    logger.info(f"\nProcessing {model_name}")
+    logger.info("Step 1: Loading CNTK model and checking for CrossEntropyWithSoftmax...")
     
     try:
         # First attempt - direct conversion
         z = C.Function.load(model_path, device=C.device.cpu())
-        z.save(onnx_path, format=C.ModelFormat.ONNX)
-        logger.info(f"Direct conversion successful: {onnx_path}")
         
-    except Exception as e:
-        logger.info(f"Direct conversion failed, attempting to prune CrossEntropyWithSoftmax...")
+        # Check if model has CrossEntropyWithSoftmax
+        needs_pruning = False
         try:
-            # Try to find and prune CrossEntropyWithSoftmax
             pnode = z.find_by_name("aux", False)
-            if pnode is None:
-                raise ValueError("Could not find 'aux' node")
+            if pnode is not None:
+                needs_pruning = True
+                logger.info("Found CrossEntropyWithSoftmax layer, will prune it")
+            else:
+                logger.info("No CrossEntropyWithSoftmax layer found")
+        except:
+            logger.info("No CrossEntropyWithSoftmax layer found")
+        
+        if needs_pruning:
+            # Prune and convert
             newModel = C.as_composite(pnode)
             newModel.save(onnx_path, format=C.ModelFormat.ONNX)
-            logger.info(f"Pruned conversion successful: {onnx_path}")
-        except Exception as e2:
-            logger.error(f"Both conversion attempts failed for {model_name}")
-            logger.error(f"Error 1: {str(e)}")
-            logger.error(f"Error 2: {str(e2)}")
-            return False
+            logger.info(f"Converted with pruning: {onnx_path}")
+        else:
+            # Direct conversion
+            z.save(onnx_path, format=C.ModelFormat.ONNX)
+            logger.info(f"Converted directly: {onnx_path}")
+            
+    except Exception as e:
+        logger.error(f"Failed to convert {model_name}")
+        logger.error(str(e))
+        return False
     
     return True
 
@@ -43,7 +53,7 @@ def create_squeezed_version(model_path):
     onnx_path = f"{model_path}.onnx"
     squeezed_path = f"squeezed_{os.path.basename(onnx_path)}"
     
-    logger.info(f"Creating squeezed version: {squeezed_path}")
+    logger.info(f"Step 2: Creating squeezed version: {squeezed_path}")
     
     try:
         mp = onnx.load(onnx_path)
@@ -76,7 +86,7 @@ def create_squeezed_version(model_path):
         
         mp_fix = shape_inference.infer_shapes(mp_fix)
         onnx.save(mp_fix, squeezed_path)
-        logger.info(f"Successfully created squeezed version: {squeezed_path}")
+        logger.info(f"Successfully created squeezed version")
         return True
         
     except Exception as e:
@@ -85,20 +95,34 @@ def create_squeezed_version(model_path):
         return False
 
 def main():
-    # Get list of CNTK models (files without extension)
-    models = [f for f in os.listdir('.') if os.path.isfile(f) and '.' not in f]
+    # List of models to convert
+    models = [
+        'CanCTR_0_0', 'CanCTR_1_0', 'CanCTR_2_0', 'CanCTR_3_0', 'CanCTR_4_0', 'CanCTR_Top',
+        'CanElbowBad', 'CanShoulderConds', 'CanShoulderPnts_top', 'EqFootOblique',
+        'FelLumbarVD_0_0', 'FelLumbarVD_1_0', 'FelLumbarVD_2_0', 'FelLumbarVD_3_0',
+        'FelLumbarVD_4_0', 'FelLumbarVD_5_0', 'FelLumbarVD_6_0', 'FelLumbarVD_7_0',
+        'FelLumbarVD_Locator', 'FelLumbarVD_Top'
+    ]
     
     logger.info(f"Found {len(models)} CNTK models to convert")
     
     for model in models:
-        logger.info(f"\nProcessing {model}")
+        logger.info(f"\n{'='*50}")
+        logger.info(f"Processing {model}")
         
+        # Remove existing ONNX files if they exist
+        if os.path.exists(f"{model}.onnx"):
+            os.remove(f"{model}.onnx")
+        if os.path.exists(f"squeezed_{model}.onnx"):
+            os.remove(f"squeezed_{model}.onnx")
+            
         # Step 1: Convert to ONNX
         if convert_to_onnx(model):
             # Step 2: Create squeezed version
             create_squeezed_version(model)
         
-        logger.info(f"Completed processing {model}\n")
+        logger.info(f"Completed processing {model}")
+        logger.info('='*50)
 
 if __name__ == "__main__":
     main()
