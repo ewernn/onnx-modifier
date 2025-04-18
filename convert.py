@@ -17,7 +17,11 @@ def convert_to_onnx(model_path):
     
     try:
         # First attempt - direct conversion
-        z = C.Function.load(model_path, device=C.device.cpu())
+        # Use absolute path for loading
+        abs_model_path = os.path.abspath(model_path)
+        logger.info(f"Loading model from: {abs_model_path}")
+        
+        z = C.Function.load(abs_model_path, device=C.device.cpu())
         
         # Check if model has CrossEntropyWithSoftmax
         needs_pruning = False
@@ -95,6 +99,10 @@ def create_squeezed_version(model_path):
         return False
 
 def main():
+    # Get the current working directory
+    base_dir = os.getcwd()
+    logger.info(f"Working directory: {base_dir}")
+    
     # List of models to convert
     models = [
         'CanCTR_0_0', 'CanCTR_1_0', 'CanCTR_2_0', 'CanCTR_3_0', 'CanCTR_4_0', 'CanCTR_Top',
@@ -106,7 +114,13 @@ def main():
     
     logger.info(f"Found {len(models)} CNTK models to convert")
     
+    # Verify files exist before processing
     for model in models:
+        model_path = os.path.join(base_dir, model)
+        if not os.path.exists(model_path):
+            logger.error(f"Model file not found: {model_path}")
+            continue
+            
         logger.info(f"\n{'='*50}")
         logger.info(f"Processing {model}")
         
@@ -117,9 +131,9 @@ def main():
             os.remove(f"squeezed_{model}.onnx")
             
         # Step 1: Convert to ONNX
-        if convert_to_onnx(model):
+        if convert_to_onnx(model_path):
             # Step 2: Create squeezed version
-            create_squeezed_version(model)
+            create_squeezed_version(model_path)
         
         logger.info(f"Completed processing {model}")
         logger.info('='*50)
