@@ -102,7 +102,7 @@ def main():
     # Get the current working directory
     base_dir = os.getcwd()
     logger.info(f"Working directory: {base_dir}")
-    logger.info(f"Working directory: {'/home/ewern/onnx-modifier'}")
+    logger.info(f"Working directory: {'/home/ewern/cntk_models'}")
     
     # List of models to convert
     models = [
