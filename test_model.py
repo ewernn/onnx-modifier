@@ -50,6 +50,18 @@ def inspect_model(model_path):
             print(f"  Type: {output.type.tensor_type.elem_type}")
             print(f"  Shape: {[d.dim_value for d in output.type.tensor_type.shape.dim]}")
         
+        print("\nConvolution Layers:")
+        for node in model.graph.node:
+            if node.op_type == 'Conv':
+                print(f"\n  Node: {node.name}")
+                print(f"  Inputs: {node.input}")
+                print(f"  Outputs: {node.output}")
+                print("  Attributes:")
+                for attr in node.attribute:
+                    if attr.name in ['dilations', 'strides', 'pads']:
+                        if attr.type == 7:  # INTS
+                            print(f"    {attr.name}: {list(attr.ints)}")
+        
         # Count initializers that are also inputs
         initializer_names = {init.name for init in model.graph.initializer}
         input_names = {input.name for input in model.graph.input}
@@ -98,8 +110,8 @@ def load_and_preprocess_image(image_path, target_size=(299, 299)):
     # Convert to grayscale
     img = img.convert('L')
     
-    # Resize
-    img = img.resize(target_size, Image.Resampling.LANCZOS)
+    # Resize (using BICUBIC for Python 3.6 compatibility)
+    img = img.resize(target_size, Image.BICUBIC)
     
     # Convert to numpy array and normalize
     img_array = np.array(img, dtype=np.float32) / 255.0
@@ -170,7 +182,7 @@ def test_model(model_path, image_path, expected_output_path):
 
 if __name__ == "__main__":
     # Model and data paths
-    model_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/fixed_models/modified_1-squeezed_FelLumbarVD_Top.onnx"
+    model_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/fixed_models/1-CanShoulderConds_fixed.onnx"
     image_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/Sample_Shoulder_Conds.jpg"
     expected_output_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/Shoulder_Conds_Output.txt"
     
