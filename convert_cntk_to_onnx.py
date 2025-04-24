@@ -102,13 +102,16 @@ def fix_pooling_pads(model):
                     break
             
             if pads_attr:
-                # Fix padding to be symmetric
+                # Fix padding to be symmetric and correct size
                 pads = list(pads_attr.ints)
-                if len(pads) == 4:  # 2D pooling
+                if len(pads) == 6:  # 3D pooling format
+                    # Convert to 2D pooling format [top, left, bottom, right]
+                    pads = [pads[1], pads[2], pads[4], pads[5]]
+                elif len(pads) == 4:  # 2D pooling
                     # Make sure padding is symmetric
                     pads[0] = pads[2] = max(pads[0], pads[2])
                     pads[1] = pads[3] = max(pads[1], pads[3])
-                    pads_attr.ints[:] = pads
+                pads_attr.ints[:] = pads
             
             new_model.graph.node.extend([new_node])
         else:
