@@ -34,33 +34,27 @@ def inspect_model(model_path):
     try:
         model = onnx.load(model_path)
         print("\n=== Model Inspection ===")
-        print(f"Model IR version: {model.ir_version}")
-        print(f"Producer name: {model.producer_name}")
-        print(f"Producer version: {model.producer_version}")
         
+        # Show inputs
         print("\nInputs:")
         for input in model.graph.input:
-            print(f"  Name: {input.name}")
-            print(f"  Type: {input.type.tensor_type.elem_type}")
-            print(f"  Shape: {[d.dim_value for d in input.type.tensor_type.shape.dim]}")
+            print(f"  {input.name}: {[d.dim_value for d in input.type.tensor_type.shape.dim]}")
         
+        # Show outputs
         print("\nOutputs:")
         for output in model.graph.output:
-            print(f"  Name: {output.name}")
-            print(f"  Type: {output.type.tensor_type.elem_type}")
-            print(f"  Shape: {[d.dim_value for d in output.type.tensor_type.shape.dim]}")
+            print(f"  {output.name}: {[d.dim_value for d in output.type.tensor_type.shape.dim]}")
         
-        print("\nConvolution Layers:")
+        # Find auxiliary branch nodes
+        print("\nAuxiliary Branch Nodes:")
+        aux_nodes = []
         for node in model.graph.node:
-            if node.op_type == 'Conv':
-                print(f"\n  Node: {node.name}")
-                print(f"  Inputs: {node.input}")
-                print(f"  Outputs: {node.output}")
-                print("  Attributes:")
-                for attr in node.attribute:
-                    if attr.name in ['dilations', 'strides', 'pads']:
-                        if attr.type == 7:  # INTS
-                            print(f"    {attr.name}: {list(attr.ints)}")
+            # Look for nodes connected to regr or rmse_Output
+            if any('regr' in inp for inp in node.input) or any('rmse' in out for out in node.output):
+                aux_nodes.append(node)
+                print(f"  {node.name} ({node.op_type})")
+                print(f"    Inputs: {node.input}")
+                print(f"    Outputs: {node.output}")
         
         # Count initializers that are also inputs
         initializer_names = {init.name for init in model.graph.initializer}
@@ -69,7 +63,6 @@ def inspect_model(model_path):
         
         if problematic_inputs:
             print(f"\nWARNING: Found {len(problematic_inputs)} initializers that are also inputs")
-            print("This may affect model optimization. Consider using the ONNX Runtime tool to fix this.")
         
         return model
     except Exception as e:
@@ -136,9 +129,10 @@ def test_model(model_path, image_path, expected_output_path):
         if model is None:
             return False
         
-        # Try to fix pooling pads
-        print("\n=== Fixing Pooling Pads ===")
-        fixed_model_path = fix_pooling_pads(model_path)
+        # # Try to fix pooling pads
+        # print("\n=== Fixing Pooling Pads ===")
+        # fixed_model_path = fix_pooling_pads(model_path)
+        fixed_model_path = model_path
         
         # Load and preprocess image
         input_data = load_and_preprocess_image(image_path)
@@ -183,6 +177,7 @@ def test_model(model_path, image_path, expected_output_path):
 if __name__ == "__main__":
     # Model and data paths
     model_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/fixed_models/1-CanShoulderConds_fixed.onnx"
+    model_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/fixed_models/squeezed_1-CanShoulderConds_fixed.onnx"
     image_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/Sample_Shoulder_Conds.jpg"
     expected_output_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/Shoulder_Conds_Output.txt"
     

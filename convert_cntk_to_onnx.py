@@ -10,6 +10,39 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+def remove_auxiliary_branch(model):
+    """Remove auxiliary branch nodes and clean up inputs/outputs."""
+    # Create new model
+    new_model = onnx.ModelProto()
+    new_model.CopyFrom(model)
+    new_model.graph.ClearField('node')
+    new_model.graph.ClearField('input')
+    new_model.graph.ClearField('output')
+    
+    # Keep only the main input (features)
+    for input in model.graph.input:
+        if input.name == 'features':
+            new_model.graph.input.append(input)
+    
+    # Keep only the main output (z_Output_attach_noop_)
+    for output in model.graph.output:
+        if output.name == 'z_Output_attach_noop_':
+            new_model.graph.output.append(output)
+    
+    # Keep all initializers
+    new_model.graph.ClearField('initializer')
+    for init in model.graph.initializer:
+        new_model.graph.initializer.append(init)
+    
+    # Keep all nodes except auxiliary branch nodes
+    for node in model.graph.node:
+        # Skip nodes that are part of the auxiliary branch
+        if any('regr' in inp for inp in node.input) or any('rmse' in out for out in node.output):
+            continue
+        new_model.graph.node.append(node)
+    
+    return new_model
+
 def convert_model(model_path):
     """Convert CNTK model to ONNX with all necessary steps."""
     logger.info(f"Converting {model_path}...")
@@ -87,11 +120,16 @@ def convert_model(model_path):
         if was_modified:
             logger.info("Fixed pooling layer paddings")
         
-        # Step 6: Save final model
+        # Step 6: Remove auxiliary branch
+        logger.info("Removing auxiliary branch...")
+        model = onnx.load(squeezed_path)
+        cleaned_model = remove_auxiliary_branch(model)
+        
+        # Step 7: Save final model
         fixed_path = f"{os.path.splitext(squeezed_path)[0]}_fixed.onnx"
         logger.info(f"Saving final model to: {fixed_path}")
         with open(fixed_path, 'wb') as f:
-            f.write(modifier.model_proto.SerializeToString())
+            f.write(cleaned_model.SerializeToString())
         
         # Verify the converted model
         logger.info("Verifying converted model...")
