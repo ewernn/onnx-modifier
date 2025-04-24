@@ -45,16 +45,18 @@ def inspect_model(model_path):
         for output in model.graph.output:
             print(f"  {output.name}: {[d.dim_value for d in output.type.tensor_type.shape.dim]}")
         
-        # Find auxiliary branch nodes
-        print("\nAuxiliary Branch Nodes:")
-        aux_nodes = []
+        # Show pooling layers
+        print("\nPooling Layers:")
         for node in model.graph.node:
-            # Look for nodes connected to regr or rmse_Output
-            if any('regr' in inp for inp in node.input) or any('rmse' in out for out in node.output):
-                aux_nodes.append(node)
-                print(f"  {node.name} ({node.op_type})")
+            if node.op_type in ['MaxPool', 'AveragePool']:
+                print(f"\n  {node.name} ({node.op_type})")
                 print(f"    Inputs: {node.input}")
                 print(f"    Outputs: {node.output}")
+                print("    Attributes:")
+                for attr in node.attribute:
+                    if attr.name in ['pads', 'strides', 'kernel_shape']:
+                        if attr.type == 7:  # INTS
+                            print(f"      {attr.name}: {list(attr.ints)}")
         
         # Count initializers that are also inputs
         initializer_names = {init.name for init in model.graph.initializer}
@@ -176,10 +178,11 @@ def test_model(model_path, image_path, expected_output_path):
 
 if __name__ == "__main__":
     # Model and data paths
-    model_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/fixed_models/1-CanShoulderConds_fixed.onnx"
-    model_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/fixed_models/squeezed_1-CanShoulderConds_fixed.onnx"
-    model_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/fixed_models/351pm-squeezed_1-CanShoulderConds_fixed.onnx"
-    model_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/fixed_models/406pm-squeezed_1-CanShoulderConds_fixed.onnx"
+    # model_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/fixed_models/1-CanShoulderConds_fixed.onnx"
+    # model_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/fixed_models/squeezed_1-CanShoulderConds_fixed.onnx"
+    # model_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/fixed_models/351pm-squeezed_1-CanShoulderConds_fixed.onnx"
+    # model_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/fixed_models/406pm-squeezed_1-CanShoulderConds_fixed.onnx"
+    model_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/fixed_models/415pm-squeezed_1-CanShoulderConds_fixed.onnx"
     image_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/Sample_Shoulder_Conds.jpg"
     expected_output_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/Shoulder_Conds_Output.txt"
     
