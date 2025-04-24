@@ -22,24 +22,24 @@ def remove_auxiliary_branch(model):
     # Keep only the main input (features)
     for input in model.graph.input:
         if input.name == 'features':
-            new_model.graph.input.append(input)
+            new_model.graph.input.extend([input])
     
     # Keep only the main output (z_Output_attach_noop_)
     for output in model.graph.output:
         if output.name == 'z_Output_attach_noop_':
-            new_model.graph.output.append(output)
+            new_model.graph.output.extend([output])
     
     # Keep all initializers
     new_model.graph.ClearField('initializer')
     for init in model.graph.initializer:
-        new_model.graph.initializer.append(init)
+        new_model.graph.initializer.extend([init])
     
     # Keep all nodes except auxiliary branch nodes
     for node in model.graph.node:
         # Skip nodes that are part of the auxiliary branch
         if any('regr' in inp for inp in node.input) or any('rmse' in out for out in node.output):
             continue
-        new_model.graph.node.append(node)
+        new_model.graph.node.extend([node])
     
     return new_model
 
