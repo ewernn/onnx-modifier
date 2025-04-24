@@ -11,8 +11,8 @@ def load_and_preprocess_image(image_path, target_size=(299, 299)):
     # Convert to grayscale
     img = img.convert('L')
     
-    # Resize
-    img = img.resize(target_size, Image.Resampling.LANCZOS)
+    # Resize (using BICUBIC for Python 3.6 compatibility)
+    img = img.resize(target_size, Image.BICUBIC)
     
     # Convert to numpy array and normalize
     img_array = np.array(img, dtype=np.float32) / 255.0
