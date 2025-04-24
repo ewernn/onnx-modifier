@@ -40,22 +40,29 @@ def remove_auxiliary_branch(model):
         for output in node.output:
             output_to_node[output] = node
     
+    # Build a map of node inputs to their nodes
+    input_to_node = {}
+    for node in model.graph.node:
+        for input in node.input:
+            if input not in input_to_node:
+                input_to_node[input] = []
+            input_to_node[input].append(node)
+    
+    # Find all nodes that are part of the auxiliary branch
+    aux_nodes = set()
+    for node in model.graph.node:
+        # Check if node is directly part of auxiliary branch
+        if any('regr' in inp for inp in node.input) or any('rmse' in out for out in node.output):
+            aux_nodes.add(node)
+            # Add all nodes that depend on this node's outputs
+            for output in node.output:
+                if output in input_to_node:
+                    for dependent_node in input_to_node[output]:
+                        aux_nodes.add(dependent_node)
+    
     # Keep all nodes except auxiliary branch nodes
     for node in model.graph.node:
-        # Skip nodes that are part of the auxiliary branch
-        if any('regr' in inp for inp in node.input) or any('rmse' in out for out in node.output):
-            continue
-            
-        # Check if any of this node's inputs come from auxiliary branch
-        skip_node = False
-        for input in node.input:
-            if input in output_to_node:
-                input_node = output_to_node[input]
-                if any('regr' in inp for inp in input_node.input) or any('rmse' in out for out in input_node.output):
-                    skip_node = True
-                    break
-        
-        if not skip_node:
+        if node not in aux_nodes:
             new_model.graph.node.extend([node])
     
     return new_model
