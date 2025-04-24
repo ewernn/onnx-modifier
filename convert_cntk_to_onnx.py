@@ -34,12 +34,29 @@ def remove_auxiliary_branch(model):
     for init in model.graph.initializer:
         new_model.graph.initializer.extend([init])
     
+    # Build a map of node outputs to their nodes
+    output_to_node = {}
+    for node in model.graph.node:
+        for output in node.output:
+            output_to_node[output] = node
+    
     # Keep all nodes except auxiliary branch nodes
     for node in model.graph.node:
         # Skip nodes that are part of the auxiliary branch
         if any('regr' in inp for inp in node.input) or any('rmse' in out for out in node.output):
             continue
-        new_model.graph.node.extend([node])
+            
+        # Check if any of this node's inputs come from auxiliary branch
+        skip_node = False
+        for input in node.input:
+            if input in output_to_node:
+                input_node = output_to_node[input]
+                if any('regr' in inp for inp in input_node.input) or any('rmse' in out for out in input_node.output):
+                    skip_node = True
+                    break
+        
+        if not skip_node:
+            new_model.graph.node.extend([node])
     
     return new_model
 
