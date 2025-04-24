@@ -11,39 +11,85 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def convert_model(model_path):
-    """Convert CNTK model to ONNX, keeping only the main output branch."""
+    """Convert CNTK model to ONNX with all necessary steps."""
     logger.info(f"Converting {model_path}...")
     
     try:
-        # Load CNTK model
+        # Step 1: Load CNTK model
         logger.info("Loading CNTK model...")
         z = C.Function.load(model_path, device=C.device.cpu())
         
-        # Find the main output node (z)
-        logger.info("Finding main output node...")
-        main_output = z.find_by_name("z", False)
-        if main_output is None:
-            raise ValueError("Could not find 'z' output node in model")
-        
-        # Create new model with only main output
-        logger.info("Creating new model with only main output...")
-        newModel = C.as_composite(main_output)
-        
-        # Save to ONNX
+        # Step 2: Try direct conversion first
+        logger.info("Attempting direct conversion...")
         output_path = f"{os.path.splitext(model_path)[0]}.onnx"
-        logger.info(f"Saving to ONNX format: {output_path}")
-        newModel.save(output_path, format=C.ModelFormat.ONNX)
+        try:
+            z.save(output_path, format=C.ModelFormat.ONNX)
+        except Exception as e:
+            logger.info(f"Direct conversion failed: {e}")
+            logger.info("Attempting to prune CrossEntropyWithSoftmax layer...")
+            # Find and prune the aux node
+            pnode = z.find_by_name("aux", False)
+            if pnode is None:
+                raise ValueError("Could not find 'aux' node for pruning")
+            newModel = C.as_composite(pnode)
+            newModel.save(output_path, format=C.ModelFormat.ONNX)
         
-        # Fix pooling pads
+        # Step 3: Add squeeze/unsqueeze layers
+        logger.info("Adding squeeze/unsqueeze layers...")
+        mp = onnx.load(output_path)
+        mp_fix = onnx.ModelProto()
+        mp_fix.CopyFrom(mp)
+        mp_fix.graph.ClearField('node')
+        mp_fix.graph.ClearField('value_info')
+        
+        exists = set()
+        for i, n in enumerate(mp.graph.node):
+            if n.op_type in ['MaxPool', 'AveragePool', "Conv", "BatchNormalization"]:
+                if (n.input[0] + '_squeezed' not in exists):
+                    mp_fix.graph.node.add().CopyFrom(
+                        helper.make_node('Squeeze', 
+                                      inputs=[n.input[0]], 
+                                      outputs=[n.input[0] + '_squeezed'],
+                                      axes=[0]
+                        )
+                    )
+                    
+                pool_node = mp_fix.graph.node.add()
+                pool_node.CopyFrom(n)
+                pool_node.input[0] += '_squeezed'
+                pool_node.output[0] += '_before_unsqueeze'
+                
+                mp_fix.graph.node.add().CopyFrom(
+                    helper.make_node('Unsqueeze',
+                                  inputs=[pool_node.output[0]],
+                                  outputs=[n.output[0]],
+                                  axes=[0]
+                    )
+                )
+                
+                exists.add(n.input[0] + '_squeezed')
+            else:
+                mp_fix.graph.node.add().CopyFrom(n)
+        
+        # Step 4: Run shape inference
+        logger.info("Running shape inference...")
+        mp_fix = shape_inference.infer_shapes(mp_fix)
+        
+        # Save squeezed model
+        squeezed_path = f"squeezed_{os.path.basename(output_path)}"
+        logger.info(f"Saving squeezed model to: {squeezed_path}")
+        onnx.save(mp_fix, squeezed_path)
+        
+        # Step 5: Fix pooling pads
         logger.info("Fixing pooling pads...")
-        modifier = onnxModifier.from_model_path(output_path)
+        modifier = onnxModifier.from_model_path(squeezed_path)
         was_modified = modifier.fix_pooling_pads()
         if was_modified:
             logger.info("Fixed pooling layer paddings")
         
-        # Save fixed model
-        fixed_path = f"{os.path.splitext(model_path)[0]}_fixed.onnx"
-        logger.info(f"Saving fixed model to: {fixed_path}")
+        # Step 6: Save final model
+        fixed_path = f"{os.path.splitext(squeezed_path)[0]}_fixed.onnx"
+        logger.info(f"Saving final model to: {fixed_path}")
         with open(fixed_path, 'wb') as f:
             f.write(modifier.model_proto.SerializeToString())
         
