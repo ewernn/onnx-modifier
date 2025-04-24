@@ -80,6 +80,42 @@ def remove_auxiliary_branch(model):
     
     return new_model
 
+def fix_pooling_pads(model):
+    """Fix pooling layer padding issues in the ONNX model."""
+    # Create new model
+    new_model = onnx.ModelProto()
+    new_model.CopyFrom(model)
+    new_model.graph.ClearField('node')
+    
+    # Process each node
+    for node in model.graph.node:
+        if node.op_type in ['MaxPool', 'AveragePool']:
+            # Create new node with fixed padding
+            new_node = onnx.NodeProto()
+            new_node.CopyFrom(node)
+            
+            # Find the pads attribute
+            pads_attr = None
+            for attr in new_node.attribute:
+                if attr.name == 'pads':
+                    pads_attr = attr
+                    break
+            
+            if pads_attr:
+                # Fix padding to be symmetric
+                pads = list(pads_attr.ints)
+                if len(pads) == 4:  # 2D pooling
+                    # Make sure padding is symmetric
+                    pads[0] = pads[2] = max(pads[0], pads[2])
+                    pads[1] = pads[3] = max(pads[1], pads[3])
+                    pads_attr.ints[:] = pads
+            
+            new_model.graph.node.extend([new_node])
+        else:
+            new_model.graph.node.extend([node])
+    
+    return new_model
+
 def convert_model(model_path):
     """Convert CNTK model to ONNX with all necessary steps."""
     logger.info(f"Converting {model_path}...")
@@ -152,15 +188,12 @@ def convert_model(model_path):
         
         # Step 5: Fix pooling pads
         logger.info("Fixing pooling pads...")
-        modifier = onnxModifier.from_model_path(squeezed_path)
-        was_modified = modifier.fix_pooling_pads()
-        if was_modified:
-            logger.info("Fixed pooling layer paddings")
+        model = onnx.load(squeezed_path)
+        fixed_model = fix_pooling_pads(model)
         
         # Step 6: Remove auxiliary branch
         logger.info("Removing auxiliary branch...")
-        model = onnx.load(squeezed_path)
-        cleaned_model = remove_auxiliary_branch(model)
+        cleaned_model = remove_auxiliary_branch(fixed_model)
         
         # Step 7: Save final model
         fixed_path = f"{os.path.splitext(squeezed_path)[0]}_fixed.onnx"
