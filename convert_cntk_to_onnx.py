@@ -49,20 +49,20 @@ def remove_auxiliary_branch(model):
             input_to_node[input].append(node)
     
     # Find all nodes that are part of the auxiliary branch
-    aux_nodes = set()
+    aux_node_names = set()
     for node in model.graph.node:
         # Check if node is directly part of auxiliary branch
         if any('regr' in inp for inp in node.input) or any('rmse' in out for out in node.output):
-            aux_nodes.add(node)
+            aux_node_names.add(node.name)
             # Add all nodes that depend on this node's outputs
             for output in node.output:
                 if output in input_to_node:
                     for dependent_node in input_to_node[output]:
-                        aux_nodes.add(dependent_node)
+                        aux_node_names.add(dependent_node.name)
     
     # Keep all nodes except auxiliary branch nodes
     for node in model.graph.node:
-        if node not in aux_nodes:
+        if node.name not in aux_node_names:
             new_model.graph.node.extend([node])
     
     return new_model
