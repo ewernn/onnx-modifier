@@ -34,6 +34,12 @@ def remove_auxiliary_branch(model):
     for init in model.graph.initializer:
         new_model.graph.initializer.extend([init])
     
+    # Build a map of node outputs to their nodes
+    output_to_node = {}
+    for node in model.graph.node:
+        for output in node.output:
+            output_to_node[output] = node
+    
     # Build a map of node inputs to their nodes
     input_to_node = {}
     for node in model.graph.node:
@@ -44,34 +50,15 @@ def remove_auxiliary_branch(model):
     
     # Find all nodes that are part of the auxiliary branch
     aux_node_names = set()
-    nodes_to_process = set()
-    
-    # Start with nodes that take regr as input
-    if 'regr' in input_to_node:
-        for node in input_to_node['regr']:
-            nodes_to_process.add(node.name)
-    
-    # Process all nodes in the auxiliary branch
-    while nodes_to_process:
-        node_name = nodes_to_process.pop()
-        if node_name in aux_node_names:
-            continue
-            
-        aux_node_names.add(node_name)
-        
-        # Find the node
-        node = None
-        for n in model.graph.node:
-            if n.name == node_name:
-                node = n
-                break
-                
-        if node:
-            # Add all nodes that take this node's outputs as input
+    for node in model.graph.node:
+        # Check if node is directly part of auxiliary branch
+        if any('regr' in inp for inp in node.input) or any('rmse' in out for out in node.output):
+            aux_node_names.add(node.name)
+            # Add all nodes that depend on this node's outputs
             for output in node.output:
                 if output in input_to_node:
                     for dependent_node in input_to_node[output]:
-                        nodes_to_process.add(dependent_node.name)
+                        aux_node_names.add(dependent_node.name)
     
     # Keep all nodes except auxiliary branch nodes
     for node in model.graph.node:
