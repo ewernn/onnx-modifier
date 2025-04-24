@@ -15,7 +15,7 @@ def load_cntk_model(model_path):
         print(f"Error loading CNTK model: {e}")
         return None
 
-def test_onnx_model(model_path, input_shape=(1, 3, 224, 224)):
+def test_onnx_model(model_path):
     """Test ONNX model with random input and check for zero outputs."""
     try:
         # Load model
@@ -59,18 +59,25 @@ def validate_conversion_steps(model_path):
     print("\n1. Testing original CNTK model...")
     cntk_model = load_cntk_model(model_path)
     if cntk_model:
-        # Create test input
+        # Get model input details
+        input_name = cntk_model.arguments[0].name
+        input_shape = cntk_model.arguments[0].shape
+        print(f"CNTK model input name: {input_name}")
+        print(f"CNTK model input shape: {input_shape}")
+        
+        # Create test input with correct shape
         np.random.seed(42)
-        x = np.random.randn(1, 3, 224, 224).astype(np.float32)
+        x = np.random.randn(*input_shape).astype(np.float32)
+        
         try:
-            output = cntk_model.eval({cntk_model.arguments[0]: x})
+            output = cntk_model.eval({input_name: x})
             print(f"CNTK model output shape: {output.shape}")
             print(f"CNTK model output min: {output.min()}, max: {output.max()}, mean: {output.mean()}")
         except Exception as e:
             print(f"Error evaluating CNTK model: {e}")
     
     # 2. Test after initial ONNX conversion
-    onnx_path = model_path.replace('.dnn', '.onnx')
+    onnx_path = f"{model_path}.onnx"
     print(f"\n2. Testing initial ONNX conversion: {onnx_path}")
     if os.path.exists(onnx_path):
         test_onnx_model(onnx_path)
@@ -78,7 +85,7 @@ def validate_conversion_steps(model_path):
         print(f"ONNX model not found: {onnx_path}")
     
     # 3. Test after squeeze/unsqueeze addition
-    squeezed_path = onnx_path.replace('.onnx', '_squeezed.onnx')
+    squeezed_path = f"squeezed_{os.path.basename(onnx_path)}"
     print(f"\n3. Testing squeezed version: {squeezed_path}")
     if os.path.exists(squeezed_path):
         test_onnx_model(squeezed_path)
@@ -100,4 +107,4 @@ if __name__ == "__main__":
         sys.exit(1)
     
     model_path = sys.argv[1]
-    validate_conversion_steps(model_path) 
+    validate_conversion_steps(model_path)
