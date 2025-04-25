@@ -10,87 +10,6 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def remove_auxiliary_branch(model):
-    """Remove auxiliary branch nodes and clean up inputs/outputs."""
-    logger.info("Starting auxiliary branch removal...")
-    
-    # Create new model
-    new_model = onnx.ModelProto()
-    new_model.CopyFrom(model)
-    new_model.graph.ClearField('node')
-    new_model.graph.ClearField('input')
-    new_model.graph.ClearField('output')
-    
-    # Keep only the main input (features)
-    for input in model.graph.input:
-        if input.name == 'features':
-            new_model.graph.input.extend([input])
-            logger.info(f"Keeping input: {input.name}")
-    
-    # Keep only the main output (z_Output_attach_noop_)
-    for output in model.graph.output:
-        if output.name == 'z_Output_attach_noop_':
-            new_model.graph.output.extend([output])
-            logger.info(f"Keeping output: {output.name}")
-    
-    # Keep all initializers
-    new_model.graph.ClearField('initializer')
-    for init in model.graph.initializer:
-        new_model.graph.initializer.extend([init])
-    
-    # Build a map of node inputs to their nodes
-    input_to_node = {}
-    for node in model.graph.node:
-        for input in node.input:
-            if input not in input_to_node:
-                input_to_node[input] = []
-            input_to_node[input].append(node)
-    
-    # Find all nodes that are part of the auxiliary branch
-    aux_node_names = set()
-    nodes_to_process = set()
-    
-    # Start with nodes that take regr as input
-    if 'regr' in input_to_node:
-        for node in input_to_node['regr']:
-            nodes_to_process.add(node.name)
-            logger.info(f"Found auxiliary node: {node.name} (takes regr as input)")
-    
-    # Process all nodes in the auxiliary branch
-    while nodes_to_process:
-        node_name = nodes_to_process.pop()
-        if node_name in aux_node_names:
-            continue
-            
-        aux_node_names.add(node_name)
-        
-        # Find the node
-        node = None
-        for n in model.graph.node:
-            if n.name == node_name:
-                node = n
-                break
-                
-        if node:
-            # Add all nodes that take this node's outputs as input
-            for output in node.output:
-                if output in input_to_node:
-                    for dependent_node in input_to_node[output]:
-                        nodes_to_process.add(dependent_node.name)
-                        logger.info(f"Found dependent auxiliary node: {dependent_node.name}")
-    
-    logger.info(f"Found {len(aux_node_names)} auxiliary nodes to remove")
-    
-    # Keep all nodes except auxiliary branch nodes
-    for node in model.graph.node:
-        if node.name not in aux_node_names:
-            new_model.graph.node.extend([node])
-            logger.info(f"Keeping node: {node.name} ({node.op_type})")
-        else:
-            logger.info(f"Removing node: {node.name} ({node.op_type})")
-    
-    return new_model
-
 def fix_pooling_pads(model):
     """Fix pooling layer padding issues in the ONNX model."""
     # Create new model
@@ -154,7 +73,7 @@ def convert_model(model_path):
             newModel = C.as_composite(pnode)
             newModel.save(output_path, format=C.ModelFormat.ONNX)
         
-        # Step 3: Add squeeze/unsqueeze layers more conservatively
+        # Step 3: Add squeeze/unsqueeze layers
         logger.info("Adding squeeze/unsqueeze layers...")
         mp = onnx.load(output_path)
         mp_fix = onnx.ModelProto()
@@ -167,7 +86,7 @@ def convert_model(model_path):
         
         for i, n in enumerate(mp.graph.node):
             if n.op_type in ['MaxPool', 'AveragePool', 'Conv', 'BatchNormalization']:
-                # Only add squeeze/unsqueeze for pooling layers
+                # Add squeeze/unsqueeze for these operations
                 input_tensor = n.input[0]
                 if input_tensor not in squeezed_tensors:
                     # Add squeeze only if not already squeezed
@@ -178,20 +97,20 @@ def convert_model(model_path):
                     mp_fix.graph.node.add().CopyFrom(squeeze_node)
                     squeezed_tensors.add(input_tensor)
                 
-                # Modify pooling node to use squeezed input
-                pool_node = mp_fix.graph.node.add()
-                pool_node.CopyFrom(n)
-                pool_node.input[0] = input_tensor + '_squeezed'
-                pool_node.output[0] = n.output[0] + '_before_unsqueeze'
+                # Modify node to use squeezed input
+                op_node = mp_fix.graph.node.add()
+                op_node.CopyFrom(n)
+                op_node.input[0] = input_tensor + '_squeezed'
+                op_node.output[0] = n.output[0] + '_before_unsqueeze'
                 
                 # Add unsqueeze
                 unsqueeze_node = helper.make_node('Unsqueeze',
-                                                inputs=[pool_node.output[0]],
+                                                inputs=[op_node.output[0]],
                                                 outputs=[n.output[0]],
                                                 axes=[0])
                 mp_fix.graph.node.add().CopyFrom(unsqueeze_node)
             else:
-                # For non-pooling nodes, check if inputs need to be unsqueezed
+                # For other nodes, check if inputs need to be unsqueezed
                 new_node = mp_fix.graph.node.add()
                 new_node.CopyFrom(n)
                 
