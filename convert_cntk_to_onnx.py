@@ -151,11 +151,11 @@ def convert_model(model_path):
         onnx.checker.check_model(model)
         
         # Print model structure
-        logger.info("\n=== Converted Model Structure ===")
-        logger.info("\nInputs:")
-        for input in model.graph.input:
-            logger.info(f"  Name: {input.name}")
-            logger.info(f"  Shape: {[d.dim_value for d in input.type.tensor_type.shape.dim]}")
+        # logger.info("\n=== Converted Model Structure ===")
+        # logger.info("\nInputs:")
+        # for input in model.graph.input:
+        #     logger.info(f"  Name: {input.name}")
+        #     logger.info(f"  Shape: {[d.dim_value for d in input.type.tensor_type.shape.dim]}")
         
         logger.info("\nOutputs:")
         for output in model.graph.output:
