@@ -137,7 +137,7 @@ def load_and_preprocess_image(image_path, target_size=(299, 299)):
     # Add batch and channel dimensions to match [0, 1, 1, 299, 299]
     img_array = np.expand_dims(img_array, axis=0)  # Add batch dimension
     img_array = np.expand_dims(img_array, axis=0)  # Add channel dimension
-    img_array = np.expand_dims(img_array, axis=0)  # Add extra dimension
+    #img_array = np.expand_dims(img_array, axis=0)  # Add extra dimension
     
     return img_array
 
@@ -207,6 +207,43 @@ def test_model(model_path, image_path, expected_output_path):
         print(f"Error testing model: {e}")
         return False
 
+def inspect_conv_node(model_path, node_name="model.model.conv_1._.x.c"):
+    """Inspect a specific Conv node in the model."""
+    try:
+        model = onnx.load(model_path)
+        print(f"\n=== Inspecting Conv Node: {node_name} ===")
+        
+        # Find the specific node
+        target_node = None
+        for node in model.graph.node:
+            if node.name == node_name:
+                target_node = node
+                break
+        
+        if target_node:
+            print(f"\nNode Details:")
+            print(f"  Name: {target_node.name}")
+            print(f"  Op Type: {target_node.op_type}")
+            print(f"  Inputs: {target_node.input}")
+            print(f"  Outputs: {target_node.output}")
+            print("\n  Attributes:")
+            for attr in target_node.attribute:
+                if attr.type == 7:  # INTS
+                    print(f"    {attr.name}: {list(attr.ints)}")
+                elif attr.type == 1:  # FLOAT
+                    print(f"    {attr.name}: {attr.f}")
+                elif attr.type == 2:  # INT
+                    print(f"    {attr.name}: {attr.i}")
+                elif attr.type == 3:  # STRING
+                    print(f"    {attr.name}: {attr.s}")
+        else:
+            print(f"Node {node_name} not found in model")
+        
+        return target_node
+    except Exception as e:
+        print(f"Error inspecting Conv node: {e}")
+        return None
+
 if __name__ == "__main__":
     # Model and data paths
     # model_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/fixed_models/1-CanShoulderConds_fixed.onnx"
@@ -216,8 +253,12 @@ if __name__ == "__main__":
     # model_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/fixed_models/415pm-squeezed_1-CanShoulderConds_fixed.onnx"
     model_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/fixed_models/423pm-squeezed_1-CanShoulderConds_fixed.onnx"
     # model_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/fixed_models/728pm-unfixed_squeezed_1-CanShoulderConds.onnx"
+    model_path = "/Users/ewern/Downloads/modified_squeezed_CanShoulderConds_fixed.onnx"
     image_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/Sample_Shoulder_Conds.jpg"
     expected_output_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/Shoulder_Conds_Output.txt"
     
-    # Run test
+    # First inspect the problematic Conv node
+    inspect_conv_node(model_path)
+    
+    # Then run the full test
     test_model(model_path, image_path, expected_output_path) 
