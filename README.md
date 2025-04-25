@@ -2,6 +2,167 @@
 
 
 
+# previous dude's colab doc copy pasta
+
+CNTK To ONNX conversor notebook
+Resources 
+You are subscribed to Colab Pro. Learn more
+Available: 100 compute units
+Usage rate: approximately 0 per hour
+You have 0 active sessions.
+Manage sessions
+
+This notebook is used in order to convert models from the cntk format to the
+onnx format. It is important to point out that this notebook and the onnx-modifier
+app were ran in ubuntu 18.04. Moreover, I used anaconda distribution to handle
+my environments. I created two environments, one was used to run everything in
+this notebook and another one for using the onnx-modifier app. The requirements
+for running this notebook include using python version 3.6.13. I have shared a
+requirements.txt file that can be installed by performing the following command:
+Want more memory and disk space?
+Upgrade to Colab Pro
+
+pip install -r requirements.txt
+Not connected to runtime.
+Change runtime type
+If you encounter problems installing CNTK, please follow the CNTK installation
+instructions here. For using the onnx-modifier, please follow this guide
+import onnx
+import numpy as np
+import pandas as pd
+import cntk as C
+import onnxruntime as rt
+In order to convert the CNTK models, we need to first load the cntk model and
+use the built in .save method of cntk models to save the model in the onnx
+format. To do this, we need to specify the name of the CNTK model we desire to
+convert in the next cell.
+If the model includes the CrossEntropyWithSoftmax layer, this layer must be
+pruned before converting the model to the onnx format. The next cell is in charge
+of performing the previously described task. It will result in an onnx file that needs
+further modifications to be used.
+model_to_convert = "EqRadFootDP_0_1"
+try:
+z = C.Function.load(model_to_convert, device=C.device.cpu())
+z.save(f"{model_to_convert}.onnx", format=C.ModelFormat.ONNX)
+except:
+#this is used only if the things fails to load
+pnode = z.find_by_name("aux", False)
+newModel = C.as_composite(pnode)
+newModel.save(f"{model_to_convert}.onnx", format=C.ModelFormat.ONNX)
+If the previously modified model is loaded through the onnxruntime, the program
+would raise an error related to ShapeInferenceError. This error is related to the
+input shape of the transformed cntk model, which is incompatible with the rest of
+the convolutional, pooling, max pooling and batch normalization layers. This is
+why squeeze and unsqueeze layers must be added to each of the mentioned
+types of layers for the model to successfully be loaded. The next cell is
+responsible of performing this operation. The result would be a model, called
+squeezed
+_
+_{model
+_
+to
+_convert
+name}, that has these sqeuezed and unsqueeze
+layers needed.
+from onnx import helper, shape_inference
+mp = onnx.load(f'{model_to_convert}.onnx')
+mp_fix = onnx.ModelProto()
+mp_fix.CopyFrom(mp)
+mp_fix.graph.ClearField('node')
+mp_fix.graph.ClearField('value_info')
+exists = set()
+for i, n in enumerate(mp.graph.node):
+if n.op_type in ['MaxPool', 'AveragePool', "Conv", "BatchNormalization"]:
+if (n.input[0] + '_squeezed' not in exists):
+mp_fix.graph.node.add().CopyFrom(helper.make_node('Squeeze', inputs =
+pool_node = mp_fix.graph.node.add()
+pool_node.CopyFrom(n)
+pool_node.input[0] += '_squeezed'
+pool_node.output[0] += '_before_unsqueeze'
+mp_fix.graph.node.add().CopyFrom(helper.make_node('Unsqueeze', pool_node.
+exists.add(n.input[0] + '_squeezed')
+else:
+mp_fix.graph.node.add().CopyFrom(n)
+mp_fix = shape_inference.infer_shapes(mp_fix)
+onnx.save(mp_fix, f'squeezed_{model_to_convert}.onnx')
+The next step must be done using the onnx-modifier app. This app can be found
+here. For installing the app, I used a different environment from the one used for
+this notebook, this is because cntk seems to be incompatible with the onnx
+version needed to run this app. To run the onnx-modifier app, the python app.py
+command and direct yourself to http://127.0.0.1:5000/. More instructions
+regarding its installation can be found in the github repository mentioned. The
+main need for this app is two fold: first, I use the onnx-modifier to remove the
+uneeded extra output of the converted onnx model. In the app, you first need to
+select the model you want to convert (the sqeezed
+_
+_{model
+name} model):
+image.png
+After opening the model, you should see multiple squeeze and unsqueeze layers
+that were added following the previous procedure. Here is an example of how this
+might look like:
+image-5.png
+Then, we need to find the path that leads to the incorrect output and elminate it.
+In the next picture, a description of what needs to be done is shown. First, we
+need to select the top layer that we want to eliminate, this is depicted with the
+number one in the image. Then, we need to select the option delete with children
+form the side bar. At last, we need to select the option "enter" so that the changes
+are submitted.
+image-2.png
+After the branch is deleted, we need to delete the input name. To do this, I select
+the input layer I want to rename and just delete every letter from the name. A
+picture of this can be seen next:
+image-3.png
+If we tried to download the model and try to load the model into onnx, an error
+would be raised related to the padding of some of the pooling layers. This is why,
+the final step of the conversion requires for us to check every pooling layer
+(maxpooling and average pooling) of the onnx model through the onnx-modifier
+and verify that each one of them has a padding that includes only 4 elements
+(e.g. four zeros or four ones depending on the model). If a pooling layer has more
+than four elements, the extra zeros or ones must be deleted until we only have
+four. The next image shows an example of an incorrect number of elements in the
+padding section of the layer, to correct this, I would just delete the number of
+zeros until we have 4, then I would click enter. It is important to point out that not
+every pooling layer has this error, only some of them have it. However, up to this
+point, I check manually each pooling layer to see if any of them have the extra
+zeros.
+image-6.png
+At last, we only need to download the model by pressing the download button.
+This will download a file with the name
+modified
+_squeezed
+_
+_{model
+to
+_convert}.onnx, which is the final version of the
+conversion which should be downloadable.
+image-7.png
+To convert any other kind of model, a similar procedure would need to be done.
+The only difference is that the path that would need to be eliminated would
+probably look different from the one shown in this report. The user has to
+manually detect and eliminate the extra path that is not useful for the inference
+procedure. The next cells are used only to check that the model loads and makes
+inferences correctly with a random input.
+# import pandas as pd
+# df = pd.read_csv('ONNX-Input.log', sep=" ", header=None, engine='python')
+# df.drop(df.columns[[0]], axis=1, inplace=True)
+# df.drop(index=0, inplace=True)
+# test = df.to_numpy(dtype=np.float32)
+#test = test.reshape(1,1,1,299,299)
+test = np.random.rand(1,1,1,299,299)
+test = test.astype('float32')
+sess = rt.InferenceSession(f"modified_squeezed_{model_to_convert}.onnx") # Start
+input_name = sess.get_inputs()[0].name
+output_name = sess.get_outputs()[0].name
+print(f"Input shape: {test.shape}")
+output = sess.run([output_name], {input_name: test}) # Compute the standardized o
+print(f"Output shape: {np.shape(output)}")
+print(output[0][0][0])
+Input shape: (1, 1, 1, 299, 299)
+Output shape: (1, 1, 1, 2)
+[0.47942472 0.47278124]
+
+
 
 
 <img src="./docs/onnx_modifier_logo.png" style="zoom: 60%;" />

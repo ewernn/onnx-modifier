@@ -220,15 +220,11 @@ def convert_model(model_path):
         model = onnx.load(squeezed_path)
         fixed_model = fix_pooling_pads(model)
         
-        # Step 6: Remove auxiliary branch
-        logger.info("Removing auxiliary branch...")
-        cleaned_model = remove_auxiliary_branch(fixed_model)
-        
-        # Step 7: Save final model
+        # Save the model with fixed pooling pads
         fixed_path = f"{os.path.splitext(squeezed_path)[0]}_fixed.onnx"
-        logger.info(f"Saving final model to: {fixed_path}")
+        logger.info(f"Saving model with fixed pooling pads to: {fixed_path}")
         with open(fixed_path, 'wb') as f:
-            f.write(cleaned_model.SerializeToString())
+            f.write(fixed_model.SerializeToString())
         
         # Verify the converted model
         logger.info("Verifying converted model...")
