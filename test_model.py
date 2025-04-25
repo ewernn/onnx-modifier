@@ -120,25 +120,84 @@ def fix_pooling_pads(model_path):
         print(f"Error fixing pooling pads: {e}")
         return model_path
 
-def load_and_preprocess_image(image_path, target_size=(299, 299)):
-    """Load image, convert to grayscale, and resize."""
+def load_and_preprocess_image(image_path, target_size=(299, 299), color_mode='L', visualize=True, normalization='simple'):
+    """Load image and preprocess with different options.
+    
+    Args:
+        image_path: Path to input image
+        target_size: Target size for resizing
+        color_mode: 'L' for grayscale, 'RGB' for color
+        visualize: Whether to display the image
+        normalization: 'simple' for [0,1], 'imagenet' for ImageNet normalization
+    """
     # Load image
     img = Image.open(image_path)
     
-    # Convert to grayscale
-    img = img.convert('L')
+    # Visualize original image if requested
+    if visualize:
+        try:
+            print(f"\n=== Input Image Visualization ===")
+            print(f"Original image shape: {img.size}, mode: {img.mode}")
+            img.show()  # Display image
+        except Exception as e:
+            print(f"Error visualizing image: {e}")
     
-    # Resize (using BICUBIC for Python 3.6 compatibility)
+    # Convert to desired color mode
+    img = img.convert(color_mode)
+    if visualize and color_mode != img.mode:
+        try:
+            print(f"Converted to {color_mode} mode")
+            img.show()  # Show converted image
+        except Exception as e:
+            print(f"Error visualizing converted image: {e}")
+    
+    # Resize
     img = img.resize(target_size, Image.BICUBIC)
+    if visualize:
+        try:
+            print(f"Resized to {target_size}")
+            img.show()  # Show resized image
+        except Exception as e:
+            print(f"Error visualizing resized image: {e}")
     
     # Convert to numpy array and normalize
-    img_array = np.array(img, dtype=np.float32) / 255.0
+    img_array = np.array(img, dtype=np.float32)
     
-    # Add batch and channel dimensions to match [0, 1, 1, 299, 299]
-    img_array = np.expand_dims(img_array, axis=0)  # Add batch dimension
-    img_array = np.expand_dims(img_array, axis=0)  # Add channel dimension
-    img_array = np.expand_dims(img_array, axis=0)  # Add extra dimension
+    if normalization == 'simple':
+        # Simple [0,1] normalization
+        img_array = img_array / 255.0
+    elif normalization == 'imagenet':
+        # ImageNet normalization
+        if color_mode == 'RGB':
+            # ImageNet mean and std for RGB
+            mean = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape((1, 1, 3))
+            std = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape((1, 1, 3))
+            img_array = img_array / 255.0
+            img_array = (img_array - mean) / std
+        else:
+            # For grayscale, use average of RGB means/stds
+            mean = 0.449
+            std = 0.226
+            img_array = img_array / 255.0
+            img_array = (img_array - mean) / std
+    elif normalization == 'centered':
+        # Center to [-1, 1]
+        img_array = (img_array / 127.5) - 1.0
     
+    # Add dimensions based on color mode
+    if color_mode == 'L':
+        # For grayscale: Add batch, channel, and extra dimensions
+        img_array = np.expand_dims(img_array, axis=0)  # Add batch dimension
+        img_array = np.expand_dims(img_array, axis=0)  # Add channel dimension
+        img_array = np.expand_dims(img_array, axis=0)  # Add extra dimension for 5D
+    else:
+        # For RGB: Add batch and extra dimension, channel is already there
+        img_array = np.expand_dims(img_array, axis=0)  # Add batch dimension
+        img_array = np.transpose(img_array, (0, 3, 1, 2))  # NHWC to NCHW
+        img_array = np.expand_dims(img_array, axis=0)  # Add extra dimension for 5D
+    
+    print(f"Final preprocessed shape: {img_array.shape}")
+    print(f"Value range: [{img_array.min():.4f}, {img_array.max():.4f}], mean: {img_array.mean():.4f}")
     return img_array
 
 def load_expected_output(output_path):
@@ -244,22 +303,120 @@ def inspect_conv_node(model_path, node_name="model.model.conv_1._.x.c"):
         print(f"Error inspecting Conv node: {e}")
         return None
 
+def test_model_with_variants(model_path, image_path, expected_output_path):
+    """Test the model with different preprocessing variants."""
+    # Save original input shape for the first test
+    original_shape = None
+    best_result = None
+    best_difference = float('inf')
+    
+    # Define preprocessing variants to try
+    variants = [
+        {"name": "Grayscale, Simple Normalization", "color_mode": "L", "normalization": "simple"},
+        {"name": "RGB, Simple Normalization", "color_mode": "RGB", "normalization": "simple"},
+        {"name": "Grayscale, ImageNet Normalization", "color_mode": "L", "normalization": "imagenet"},
+        {"name": "RGB, ImageNet Normalization", "color_mode": "RGB", "normalization": "imagenet"},
+        {"name": "Grayscale, Centered Normalization", "color_mode": "L", "normalization": "centered"},
+        {"name": "RGB, Centered Normalization", "color_mode": "RGB", "normalization": "centered"},
+    ]
+    
+    # Only visualize the first variant
+    visualize_first = True
+    
+    # Initialize model only once
+    try:
+        sess_options = rt.SessionOptions()
+        sess_options.log_severity_level = 3  # Suppress all warnings
+        sess = rt.InferenceSession(model_path, sess_options)
+        input_name = sess.get_inputs()[0].name
+        print(f"Model input name: {input_name}")
+        
+        # Load expected output
+        expected_output = load_expected_output(expected_output_path)
+        
+        # Try each variant
+        for i, variant in enumerate(variants):
+            print(f"\n\n{'='*20} Testing Variant {i+1}: {variant['name']} {'='*20}")
+            
+            # Preprocess with this variant
+            visualize = visualize_first and i == 0
+            input_data = load_and_preprocess_image(
+                image_path, 
+                color_mode=variant["color_mode"], 
+                normalization=variant["normalization"],
+                visualize=visualize
+            )
+            
+            # Save shape of first variant for comparison
+            if i == 0:
+                original_shape = input_data.shape
+            elif input_data.shape != original_shape:
+                print(f"WARNING: Shape mismatch with original input: {input_data.shape} vs {original_shape}")
+                # Continue to next variant if shapes don't match
+                continue
+            
+            # Run inference
+            try:
+                outputs = sess.run(None, {input_name: input_data})
+                
+                # Compare outputs
+                for j, output in enumerate(outputs):
+                    print(f"\nOutput {j} shape: {output.shape}")
+                    print(f"Output {j} values: {output.flatten()}")
+                    print(f"Expected output: {expected_output}")
+                    
+                    # Calculate difference
+                    diff = np.abs(output.flatten() - expected_output)
+                    max_diff = np.max(diff)
+                    mean_diff = np.mean(diff)
+                    print(f"Maximum difference: {max_diff}")
+                    print(f"Mean difference: {mean_diff}")
+                    
+                    # Track best result
+                    if mean_diff < best_difference:
+                        best_difference = mean_diff
+                        best_result = {
+                            "variant": variant["name"],
+                            "output": output.flatten(),
+                            "max_diff": max_diff,
+                            "mean_diff": mean_diff
+                        }
+                    
+                    if np.allclose(output.flatten(), expected_output, rtol=1e-3, atol=1e-3):
+                        print("SUCCESS: Output matches expected values!")
+                    else:
+                        print("WARNING: Output does not match expected values!")
+            except Exception as e:
+                print(f"Error running inference with variant {i+1}: {e}")
+        
+        # Summarize best result
+        if best_result:
+            print(f"\n\n{'='*20} Best Result {'='*20}")
+            print(f"Best variant: {best_result['variant']}")
+            print(f"Output: {best_result['output']}")
+            print(f"Maximum difference: {best_result['max_diff']}")
+            print(f"Mean difference: {best_result['mean_diff']}")
+            
+            if best_result['mean_diff'] < 0.1:
+                print("CONCLUSION: Found a good match!")
+            else:
+                print("CONCLUSION: No variant provided a good match.")
+        
+        return True
+    except Exception as e:
+        print(f"Error in preprocessing variants test: {e}")
+        return False
+
 if __name__ == "__main__":
-    # Model and data paths
-    # model_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/fixed_models/1-CanShoulderConds_fixed.onnx"
-    # model_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/fixed_models/squeezed_1-CanShoulderConds_fixed.onnx"
-    # model_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/fixed_models/351pm-squeezed_1-CanShoulderConds_fixed.onnx"
-    # model_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/fixed_models/406pm-squeezed_1-CanShoulderConds_fixed.onnx"
-    # model_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/fixed_models/415pm-squeezed_1-CanShoulderConds_fixed.onnx"
-    # model_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/fixed_models/423pm-squeezed_1-CanShoulderConds_fixed.onnx"
-    # model_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/fixed_models/728pm-unfixed_squeezed_1-CanShoulderConds.onnx"
-    # model_path = "/Users/ewern/Downloads/modified_squeezed_CanShoulderConds_fixed.onnx"
-    model_path = "/Users/ewern/Downloads/modified_squeezed_CanShoulderConds_fixed.onnx"
+    model_path = "/Users/ewern/Downloads/modified_modified_12pm-squeezed_CanShoulderConds_fixed.onnx"
     image_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/Sample_Shoulder_Conds.jpg"
     expected_output_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/Shoulder_Conds_Output.txt"
     
     # First inspect the problematic Conv node
     inspect_conv_node(model_path)
     
-    # Then run the full test
-    test_model(model_path, image_path, expected_output_path) 
+    # Test with different preprocessing variants
+    test_model_with_variants(model_path, image_path, expected_output_path)
+    
+    # Run original test if needed
+    # test_model(model_path, image_path, expected_output_path) 
