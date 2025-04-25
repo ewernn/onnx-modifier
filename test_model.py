@@ -35,36 +35,59 @@ def inspect_model(model_path):
         model = onnx.load(model_path)
         print("\n=== Model Inspection ===")
         
-        # Show inputs
-        print("\nInputs:")
-        for input in model.graph.input:
-            print(f"  {input.name}: {[d.dim_value for d in input.type.tensor_type.shape.dim]}")
-        
-        # Show outputs
-        print("\nOutputs:")
-        for output in model.graph.output:
-            print(f"  {output.name}: {[d.dim_value for d in output.type.tensor_type.shape.dim]}")
-        
-        # Show pooling layers
-        print("\nPooling Layers:")
+        # Build a map of node outputs to their nodes
+        output_to_node = {}
         for node in model.graph.node:
-            if node.op_type in ['MaxPool', 'AveragePool']:
+            for output in node.output:
+                output_to_node[output] = node
+        
+        # Build a map of node inputs to their nodes
+        input_to_node = {}
+        for node in model.graph.node:
+            for input in node.input:
+                if input not in input_to_node:
+                    input_to_node[input] = []
+                input_to_node[input].append(node)
+        
+        # Show all outputs and their connections
+        print("\nAll Outputs and Their Connections:")
+        for output in model.graph.output:
+            print(f"\n  {output.name}: {[d.dim_value for d in output.type.tensor_type.shape.dim]}")
+            
+            # Find nodes that produce this output
+            if output.name in output_to_node:
+                node = output_to_node[output.name]
+                print(f"    Produced by: {node.name} ({node.op_type})")
+                print(f"    Inputs: {node.input}")
+            
+            # Find nodes that take this output as input
+            if output.name in input_to_node:
+                print("    Used by:")
+                for node in input_to_node[output.name]:
+                    print(f"      {node.name} ({node.op_type})")
+        
+        # Show nodes near the outputs
+        print("\nNodes Near Outputs:")
+        for node in model.graph.node:
+            # Check if this node's outputs are used by output nodes
+            is_near_output = False
+            for output in node.output:
+                if output in input_to_node:
+                    for dependent_node in input_to_node[output]:
+                        if dependent_node.output and any(out in [o.name for o in model.graph.output] for out in dependent_node.output):
+                            is_near_output = True
+                            break
+            
+            if is_near_output:
                 print(f"\n  {node.name} ({node.op_type})")
                 print(f"    Inputs: {node.input}")
                 print(f"    Outputs: {node.output}")
-                print("    Attributes:")
-                for attr in node.attribute:
-                    if attr.name in ['pads', 'strides', 'kernel_shape']:
+                # Show attributes for relevant nodes
+                if node.op_type in ['MaxPool', 'AveragePool', 'Conv', 'BatchNormalization']:
+                    print("    Attributes:")
+                    for attr in node.attribute:
                         if attr.type == 7:  # INTS
                             print(f"      {attr.name}: {list(attr.ints)}")
-        
-        # Count initializers that are also inputs
-        initializer_names = {init.name for init in model.graph.initializer}
-        input_names = {input.name for input in model.graph.input}
-        problematic_inputs = initializer_names.intersection(input_names)
-        
-        if problematic_inputs:
-            print(f"\nWARNING: Found {len(problematic_inputs)} initializers that are also inputs")
         
         return model
     except Exception as e:
@@ -111,16 +134,24 @@ def load_and_preprocess_image(image_path, target_size=(299, 299)):
     # Convert to numpy array and normalize
     img_array = np.array(img, dtype=np.float32) / 255.0
     
-    # Add batch dimension
-    img_array = np.expand_dims(img_array, axis=0)
+    # Add batch and channel dimensions to match [0, 1, 1, 299, 299]
+    img_array = np.expand_dims(img_array, axis=0)  # Add batch dimension
+    img_array = np.expand_dims(img_array, axis=0)  # Add channel dimension
+    img_array = np.expand_dims(img_array, axis=0)  # Add extra dimension
     
     return img_array
 
 def load_expected_output(output_path):
     """Load the expected output from file."""
     with open(output_path, 'r') as f:
-        expected_output = np.array([float(x.strip()) for x in f.readlines()], dtype=np.float32)
-    return expected_output
+        lines = f.readlines()
+        # Parse CNTK output format: "Vector[0] = 0.0000"
+        values = []
+        for line in lines:
+            if '=' in line:
+                value = float(line.split('=')[1].strip())
+                values.append(value)
+        return np.array(values, dtype=np.float32)
 
 def test_model(model_path, image_path, expected_output_path):
     """Test ONNX model with specific image and compare with expected output."""
@@ -182,7 +213,9 @@ if __name__ == "__main__":
     # model_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/fixed_models/squeezed_1-CanShoulderConds_fixed.onnx"
     # model_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/fixed_models/351pm-squeezed_1-CanShoulderConds_fixed.onnx"
     # model_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/fixed_models/406pm-squeezed_1-CanShoulderConds_fixed.onnx"
-    model_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/fixed_models/415pm-squeezed_1-CanShoulderConds_fixed.onnx"
+    # model_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/fixed_models/415pm-squeezed_1-CanShoulderConds_fixed.onnx"
+    model_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/fixed_models/423pm-squeezed_1-CanShoulderConds_fixed.onnx"
+    # model_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/fixed_models/728pm-unfixed_squeezed_1-CanShoulderConds.onnx"
     image_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/Sample_Shoulder_Conds.jpg"
     expected_output_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/Shoulder_Conds_Output.txt"
     

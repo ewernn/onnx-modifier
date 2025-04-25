@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 
 def remove_auxiliary_branch(model):
     """Remove auxiliary branch nodes and clean up inputs/outputs."""
+    logger.info("Starting auxiliary branch removal...")
+    
     # Create new model
     new_model = onnx.ModelProto()
     new_model.CopyFrom(model)
@@ -23,11 +25,13 @@ def remove_auxiliary_branch(model):
     for input in model.graph.input:
         if input.name == 'features':
             new_model.graph.input.extend([input])
+            logger.info(f"Keeping input: {input.name}")
     
     # Keep only the main output (z_Output_attach_noop_)
     for output in model.graph.output:
         if output.name == 'z_Output_attach_noop_':
             new_model.graph.output.extend([output])
+            logger.info(f"Keeping output: {output.name}")
     
     # Keep all initializers
     new_model.graph.ClearField('initializer')
@@ -50,6 +54,7 @@ def remove_auxiliary_branch(model):
     if 'regr' in input_to_node:
         for node in input_to_node['regr']:
             nodes_to_process.add(node.name)
+            logger.info(f"Found auxiliary node: {node.name} (takes regr as input)")
     
     # Process all nodes in the auxiliary branch
     while nodes_to_process:
@@ -72,11 +77,17 @@ def remove_auxiliary_branch(model):
                 if output in input_to_node:
                     for dependent_node in input_to_node[output]:
                         nodes_to_process.add(dependent_node.name)
+                        logger.info(f"Found dependent auxiliary node: {dependent_node.name}")
+    
+    logger.info(f"Found {len(aux_node_names)} auxiliary nodes to remove")
     
     # Keep all nodes except auxiliary branch nodes
     for node in model.graph.node:
         if node.name not in aux_node_names:
             new_model.graph.node.extend([node])
+            logger.info(f"Keeping node: {node.name} ({node.op_type})")
+        else:
+            logger.info(f"Removing node: {node.name} ({node.op_type})")
     
     return new_model
 
@@ -143,7 +154,7 @@ def convert_model(model_path):
             newModel = C.as_composite(pnode)
             newModel.save(output_path, format=C.ModelFormat.ONNX)
         
-        # Step 3: Add squeeze/unsqueeze layers
+        # Step 3: Add squeeze/unsqueeze layers more conservatively
         logger.info("Adding squeeze/unsqueeze layers...")
         mp = onnx.load(output_path)
         mp_fix = onnx.ModelProto()
@@ -151,34 +162,49 @@ def convert_model(model_path):
         mp_fix.graph.ClearField('node')
         mp_fix.graph.ClearField('value_info')
         
-        exists = set()
+        # Track which tensors have been squeezed
+        squeezed_tensors = set()
+        
         for i, n in enumerate(mp.graph.node):
-            if n.op_type in ['MaxPool', 'AveragePool', "Conv", "BatchNormalization"]:
-                if (n.input[0] + '_squeezed' not in exists):
-                    mp_fix.graph.node.add().CopyFrom(
-                        helper.make_node('Squeeze', 
-                                      inputs=[n.input[0]], 
-                                      outputs=[n.input[0] + '_squeezed'],
-                                      axes=[0]
-                        )
-                    )
-                    
+            if n.op_type in ['MaxPool', 'AveragePool']:
+                # Only add squeeze/unsqueeze for pooling layers
+                input_tensor = n.input[0]
+                if input_tensor not in squeezed_tensors:
+                    # Add squeeze only if not already squeezed
+                    squeeze_node = helper.make_node('Squeeze', 
+                                                  inputs=[input_tensor], 
+                                                  outputs=[input_tensor + '_squeezed'],
+                                                  axes=[0])
+                    mp_fix.graph.node.add().CopyFrom(squeeze_node)
+                    squeezed_tensors.add(input_tensor)
+                
+                # Modify pooling node to use squeezed input
                 pool_node = mp_fix.graph.node.add()
                 pool_node.CopyFrom(n)
-                pool_node.input[0] += '_squeezed'
-                pool_node.output[0] += '_before_unsqueeze'
+                pool_node.input[0] = input_tensor + '_squeezed'
+                pool_node.output[0] = n.output[0] + '_before_unsqueeze'
                 
-                mp_fix.graph.node.add().CopyFrom(
-                    helper.make_node('Unsqueeze',
-                                  inputs=[pool_node.output[0]],
-                                  outputs=[n.output[0]],
-                                  axes=[0]
-                    )
-                )
-                
-                exists.add(n.input[0] + '_squeezed')
+                # Add unsqueeze
+                unsqueeze_node = helper.make_node('Unsqueeze',
+                                                inputs=[pool_node.output[0]],
+                                                outputs=[n.output[0]],
+                                                axes=[0])
+                mp_fix.graph.node.add().CopyFrom(unsqueeze_node)
             else:
-                mp_fix.graph.node.add().CopyFrom(n)
+                # For non-pooling nodes, check if inputs need to be unsqueezed
+                new_node = mp_fix.graph.node.add()
+                new_node.CopyFrom(n)
+                
+                # Check each input
+                for j, input_tensor in enumerate(n.input):
+                    if input_tensor + '_squeezed' in squeezed_tensors:
+                        # This input was squeezed, need to unsqueeze it
+                        unsqueeze_node = helper.make_node('Unsqueeze',
+                                                        inputs=[input_tensor + '_squeezed'],
+                                                        outputs=[input_tensor],
+                                                        axes=[0])
+                        mp_fix.graph.node.add().CopyFrom(unsqueeze_node)
+                        new_node.input[j] = input_tensor
         
         # Step 4: Run shape inference
         logger.info("Running shape inference...")
