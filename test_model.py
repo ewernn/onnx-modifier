@@ -120,7 +120,8 @@ def fix_pooling_pads(model_path):
         print(f"Error fixing pooling pads: {e}")
         return model_path
 
-def load_and_preprocess_image(image_path, target_size=(299, 299), color_mode='L', visualize=True, normalization='simple'):
+def load_and_preprocess_image(image_path, target_size=(299, 299), color_mode='L', 
+                              visualize=True, normalization='simple', transpose_type=None):
     """Load image and preprocess with different options.
     
     Args:
@@ -129,6 +130,7 @@ def load_and_preprocess_image(image_path, target_size=(299, 299), color_mode='L'
         color_mode: 'L' for grayscale, 'RGB' for color
         visualize: Whether to display the image
         normalization: 'simple' for [0,1], 'imagenet' for ImageNet normalization
+        transpose_type: None, 'hw_swap', 'rot90', 'fliplr', 'flipud'
     """
     # Load image
     img = Image.open(image_path)
@@ -163,6 +165,30 @@ def load_and_preprocess_image(image_path, target_size=(299, 299), color_mode='L'
     # Convert to numpy array and normalize
     img_array = np.array(img, dtype=np.float32)
     
+    # Apply transposition if specified
+    if transpose_type:
+        if transpose_type == 'hw_swap':
+            print("Applying H/W swap transposition")
+            img_array = np.transpose(img_array)
+        elif transpose_type == 'rot90':
+            print("Applying 90-degree rotation")
+            img_array = np.rot90(img_array)
+        elif transpose_type == 'fliplr':
+            print("Applying horizontal flip")
+            img_array = np.fliplr(img_array)
+        elif transpose_type == 'flipud':
+            print("Applying vertical flip")
+            img_array = np.flipud(img_array)
+        
+        # Visualize after transposition
+        if visualize:
+            try:
+                print(f"After {transpose_type}, shape: {img_array.shape}")
+                Image.fromarray((img_array * 255).astype(np.uint8)).show()
+            except Exception as e:
+                print(f"Error visualizing transposed image: {e}")
+    
+    # Apply normalization
     if normalization == 'simple':
         # Simple [0,1] normalization
         img_array = img_array / 255.0
@@ -407,16 +433,103 @@ def test_model_with_variants(model_path, image_path, expected_output_path):
         print(f"Error in preprocessing variants test: {e}")
         return False
 
+def test_model_with_transpositions(model_path, image_path, expected_output_path):
+    """Test the model with different image transpositions."""
+    # Define transposition variants to try
+    variants = [
+        {"name": "No transposition", "transpose": None},
+        {"name": "H/W swap", "transpose": "hw_swap"},
+        {"name": "90° rotation", "transpose": "rot90"},
+        {"name": "Horizontal flip", "transpose": "fliplr"},
+        {"name": "Vertical flip", "transpose": "flipud"}
+    ]
+    
+    best_result = None
+    best_difference = float('inf')
+    
+    # Initialize model only once
+    try:
+        sess_options = rt.SessionOptions()
+        sess_options.log_severity_level = 3  # Suppress all warnings
+        sess = rt.InferenceSession(model_path, sess_options)
+        input_name = sess.get_inputs()[0].name
+        print(f"Model input name: {input_name}")
+        
+        # Load expected output
+        expected_output = load_expected_output(expected_output_path)
+        
+        # Try each variant
+        for i, variant in enumerate(variants):
+            print(f"\n\n{'='*20} Testing Variant {i+1}: {variant['name']} {'='*20}")
+            
+            # Preprocess with this variant (grayscale, simple normalization)
+            input_data = load_and_preprocess_image(
+                image_path, 
+                color_mode='L', 
+                normalization='simple',
+                transpose_type=variant["transpose"],
+                visualize=(i == 0)  # Only visualize first variant
+            )
+            
+            # Run inference
+            try:
+                outputs = sess.run(None, {input_name: input_data})
+                
+                # Compare outputs
+                for j, output in enumerate(outputs):
+                    print(f"\nOutput {j} shape: {output.shape}")
+                    print(f"Output {j} values: {output.flatten()}")
+                    print(f"Expected output: {expected_output}")
+                    
+                    # Calculate difference
+                    diff = np.abs(output.flatten() - expected_output)
+                    max_diff = np.max(diff)
+                    mean_diff = np.mean(diff)
+                    print(f"Maximum difference: {max_diff}")
+                    print(f"Mean difference: {mean_diff}")
+                    
+                    # Track best result
+                    if mean_diff < best_difference:
+                        best_difference = mean_diff
+                        best_result = {
+                            "variant": variant["name"],
+                            "output": output.flatten(),
+                            "max_diff": max_diff,
+                            "mean_diff": mean_diff
+                        }
+                    
+                    if np.allclose(output.flatten(), expected_output, rtol=1e-3, atol=1e-3):
+                        print("SUCCESS: Output matches expected values!")
+                    else:
+                        print("WARNING: Output does not match expected values!")
+            except Exception as e:
+                print(f"Error running inference with variant {i+1}: {e}")
+        
+        # Summarize best result
+        if best_result:
+            print(f"\n\n{'='*20} Best Result {'='*20}")
+            print(f"Best variant: {best_result['variant']}")
+            print(f"Output: {best_result['output']}")
+            print(f"Maximum difference: {best_result['max_diff']}")
+            print(f"Mean difference: {best_result['mean_diff']}")
+            
+            if best_result['mean_diff'] < 0.1:
+                print("CONCLUSION: Found a good match!")
+            else:
+                print("CONCLUSION: No variant provided a good match.")
+        
+        return True
+    except Exception as e:
+        print(f"Error in transposition test: {e}")
+        return False
+
 if __name__ == "__main__":
     model_path = "/Users/ewern/Downloads/modified_modified_12pm-squeezed_CanShoulderConds_fixed.onnx"
     image_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/Sample_Shoulder_Conds.jpg"
     expected_output_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/Shoulder_Conds_Output.txt"
     
-    # First inspect the problematic Conv node
+    # First inspect the model structure
     inspect_conv_node(model_path)
     
-    # Test with different preprocessing variants
-    test_model_with_variants(model_path, image_path, expected_output_path)
-    
-    # Run original test if needed
-    # test_model(model_path, image_path, expected_output_path) 
+    # Test with different transpositions
+    test_model_with_transpositions(model_path, image_path, expected_output_path)
