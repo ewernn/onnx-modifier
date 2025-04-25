@@ -137,7 +137,7 @@ def load_and_preprocess_image(image_path, target_size=(299, 299)):
     # Add batch and channel dimensions to match [0, 1, 1, 299, 299]
     img_array = np.expand_dims(img_array, axis=0)  # Add batch dimension
     img_array = np.expand_dims(img_array, axis=0)  # Add channel dimension
-    #img_array = np.expand_dims(img_array, axis=0)  # Add extra dimension
+    img_array = np.expand_dims(img_array, axis=0)  # Add extra dimension
     
     return img_array
 
@@ -251,8 +251,9 @@ if __name__ == "__main__":
     # model_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/fixed_models/351pm-squeezed_1-CanShoulderConds_fixed.onnx"
     # model_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/fixed_models/406pm-squeezed_1-CanShoulderConds_fixed.onnx"
     # model_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/fixed_models/415pm-squeezed_1-CanShoulderConds_fixed.onnx"
-    model_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/fixed_models/423pm-squeezed_1-CanShoulderConds_fixed.onnx"
+    # model_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/fixed_models/423pm-squeezed_1-CanShoulderConds_fixed.onnx"
     # model_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/fixed_models/728pm-unfixed_squeezed_1-CanShoulderConds.onnx"
+    # model_path = "/Users/ewern/Downloads/modified_squeezed_CanShoulderConds_fixed.onnx"
     model_path = "/Users/ewern/Downloads/modified_squeezed_CanShoulderConds_fixed.onnx"
     image_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/Sample_Shoulder_Conds.jpg"
     expected_output_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/Shoulder_Conds_Output.txt"

@@ -166,7 +166,7 @@ def convert_model(model_path):
         squeezed_tensors = set()
         
         for i, n in enumerate(mp.graph.node):
-            if n.op_type in ['MaxPool', 'AveragePool', 'Conv']:
+            if n.op_type in ['MaxPool', 'AveragePool', 'Conv', 'BatchNormalization']:
                 # Only add squeeze/unsqueeze for pooling layers
                 input_tensor = n.input[0]
                 if input_tensor not in squeezed_tensors:
