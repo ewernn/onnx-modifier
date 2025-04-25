@@ -73,57 +73,118 @@ def convert_model(model_path):
             newModel = C.as_composite(pnode)
             newModel.save(output_path, format=C.ModelFormat.ONNX)
         
-        # Step 3: Add squeeze/unsqueeze layers
-        logger.info("Adding squeeze/unsqueeze layers...")
+        # Step 3: Add squeeze/unsqueeze layers with look-ahead
+        logger.info("Adding squeeze/unsqueeze layers with look-ahead...")
         mp = onnx.load(output_path)
         mp_fix = onnx.ModelProto()
         mp_fix.CopyFrom(mp)
         mp_fix.graph.ClearField('node')
         mp_fix.graph.ClearField('value_info')
         
-        # Track which tensors have been squeezed
-        squeezed_tensors = set()
+        # Define target operations that need squeezing
+        target_ops = ['MaxPool', 'AveragePool', 'Conv', 'BatchNormalization']
         
-        for i, n in enumerate(mp.graph.node):
-            if n.op_type in ['MaxPool', 'AveragePool', 'Conv', 'BatchNormalization']:
-                # Add squeeze/unsqueeze for these operations
-                input_tensor = n.input[0]
-                if input_tensor not in squeezed_tensors:
-                    # Add squeeze only if not already squeezed
-                    squeeze_node = helper.make_node('Squeeze', 
-                                                  inputs=[input_tensor], 
-                                                  outputs=[input_tensor + '_squeezed'],
+        # Build a map of tensor outputs to their consumer nodes
+        output_to_consumers = {}
+        for node in mp.graph.node:
+            for input_name in node.input:
+                if input_name not in output_to_consumers:
+                    output_to_consumers[input_name] = []
+                output_to_consumers[input_name].append(node)
+        
+        # Map of original tensor names to their squeezed versions
+        tensor_to_squeezed = {}
+        # Track tensors we've already processed
+        processed_tensors = set()
+        
+        # First pass: Add nodes to the model
+        added_nodes = []
+        for i, node in enumerate(mp.graph.node):
+            is_target_op = node.op_type in target_ops
+            
+            if is_target_op:
+                # This operation needs squeezed input
+                input_tensor = node.input[0]
+                
+                # Check if the input is already in squeezed form
+                if input_tensor in tensor_to_squeezed:
+                    # Input already has a squeezed version
+                    squeezed_input = tensor_to_squeezed[input_tensor]
+                else:
+                    # Need to add squeeze operation
+                    squeezed_input = input_tensor + '_squeezed'
+                    tensor_to_squeezed[input_tensor] = squeezed_input
+                    
+                    if squeezed_input not in processed_tensors:
+                        # Add the squeeze operation
+                        squeeze_node = helper.make_node('Squeeze', 
+                                                    inputs=[input_tensor], 
+                                                    outputs=[squeezed_input],
+                                                    axes=[0])
+                        added_nodes.append(squeeze_node)
+                        processed_tensors.add(squeezed_input)
+                
+                # Create a copy of the target operation with squeezed input
+                modified_node = onnx.NodeProto()
+                modified_node.CopyFrom(node)
+                modified_node.input[0] = squeezed_input
+                
+                # Determine if output should remain squeezed
+                output_tensor = node.output[0]
+                consumers = output_to_consumers.get(output_tensor, [])
+                should_unsqueeze = True
+                
+                # Check if ALL consumers need squeezed input
+                if consumers:
+                    should_unsqueeze = False
+                    for consumer in consumers:
+                        if consumer.op_type not in target_ops:
+                            should_unsqueeze = True
+                            break
+                
+                if should_unsqueeze:
+                    # We need to unsqueeze before passing to non-target consumers
+                    squeezed_output = output_tensor + '_before_unsqueeze'
+                    modified_node.output[0] = squeezed_output
+                    
+                    # Add unsqueeze operation
+                    unsqueeze_node = helper.make_node('Unsqueeze',
+                                                  inputs=[squeezed_output],
+                                                  outputs=[output_tensor],
                                                   axes=[0])
-                    mp_fix.graph.node.add().CopyFrom(squeeze_node)
-                    squeezed_tensors.add(input_tensor)
-                
-                # Modify node to use squeezed input
-                op_node = mp_fix.graph.node.add()
-                op_node.CopyFrom(n)
-                op_node.input[0] = input_tensor + '_squeezed'
-                op_node.output[0] = n.output[0] + '_before_unsqueeze'
-                
-                # Add unsqueeze
-                unsqueeze_node = helper.make_node('Unsqueeze',
-                                                inputs=[op_node.output[0]],
-                                                outputs=[n.output[0]],
-                                                axes=[0])
-                mp_fix.graph.node.add().CopyFrom(unsqueeze_node)
+                    added_nodes.append(modified_node)
+                    added_nodes.append(unsqueeze_node)
+                else:
+                    # Keep output in squeezed form for next target operation
+                    squeezed_output = output_tensor + '_squeezed'
+                    modified_node.output[0] = squeezed_output
+                    tensor_to_squeezed[output_tensor] = squeezed_output
+                    added_nodes.append(modified_node)
             else:
-                # For other nodes, check if inputs need to be unsqueezed
-                new_node = mp_fix.graph.node.add()
-                new_node.CopyFrom(n)
+                # Regular non-target node
+                modified_node = onnx.NodeProto()
+                modified_node.CopyFrom(node)
                 
-                # Check each input
-                for j, input_tensor in enumerate(n.input):
-                    if input_tensor + '_squeezed' in squeezed_tensors:
-                        # This input was squeezed, need to unsqueeze it
-                        unsqueeze_node = helper.make_node('Unsqueeze',
-                                                        inputs=[input_tensor + '_squeezed'],
-                                                        outputs=[input_tensor],
+                # Check each input to see if it needs unsqueezing
+                for j, input_name in enumerate(node.input):
+                    if input_name in tensor_to_squeezed:
+                        # This input has a squeezed version, so we need to unsqueeze
+                        squeezed_input = tensor_to_squeezed[input_name]
+                        
+                        # Add unsqueeze if not already done
+                        if input_name not in processed_tensors:
+                            unsqueeze_node = helper.make_node('Unsqueeze',
+                                                        inputs=[squeezed_input],
+                                                        outputs=[input_name],
                                                         axes=[0])
-                        mp_fix.graph.node.add().CopyFrom(unsqueeze_node)
-                        new_node.input[j] = input_tensor
+                            added_nodes.append(unsqueeze_node)
+                            processed_tensors.add(input_name)
+                
+                added_nodes.append(modified_node)
+        
+        # Add all nodes to the model in the order we processed them
+        for node in added_nodes:
+            mp_fix.graph.node.add().CopyFrom(node)
         
         # Step 4: Run shape inference
         logger.info("Running shape inference...")
@@ -151,11 +212,11 @@ def convert_model(model_path):
         onnx.checker.check_model(model)
         
         # Print model structure
-        # logger.info("\n=== Converted Model Structure ===")
-        # logger.info("\nInputs:")
-        # for input in model.graph.input:
-        #     logger.info(f"  Name: {input.name}")
-        #     logger.info(f"  Shape: {[d.dim_value for d in input.type.tensor_type.shape.dim]}")
+        logger.info("\n=== Converted Model Structure ===")
+        logger.info("\nInputs:")
+        for input in model.graph.input:
+            logger.info(f"  Name: {input.name}")
+            logger.info(f"  Shape: {[d.dim_value for d in input.type.tensor_type.shape.dim]}")
         
         logger.info("\nOutputs:")
         for output in model.graph.output:
