@@ -165,50 +165,58 @@ def load_and_preprocess_image(image_path, target_size=(299, 299), color_mode='L'
     # Convert to numpy array and normalize
     img_array = np.array(img, dtype=np.float32)
     
-    # Apply transposition if specified
-    if transpose_type:
-        if transpose_type == 'hw_swap':
-            print("Applying H/W swap transposition")
-            img_array = np.transpose(img_array)
-        elif transpose_type == 'rot90':
-            print("Applying 90-degree rotation")
-            img_array = np.rot90(img_array)
-        elif transpose_type == 'fliplr':
-            print("Applying horizontal flip")
-            img_array = np.fliplr(img_array)
-        elif transpose_type == 'flipud':
-            print("Applying vertical flip")
-            img_array = np.flipud(img_array)
+    # Print raw pixel values (before normalization)
+    print("\n=== Raw Image Pixel Values (Top-Left Corner) ===")
+    print(img_array[0:5, 0:5])
+    
+    # # Apply transposition if specified
+    # if transpose_type:
+    #     if transpose_type == 'hw_swap':
+    #         print("Applying H/W swap transposition")
+    #         img_array = np.transpose(img_array)
+    #     elif transpose_type == 'rot90':
+    #         print("Applying 90-degree rotation")
+    #         img_array = np.rot90(img_array)
+    #     elif transpose_type == 'fliplr':
+    #         print("Applying horizontal flip")
+    #         img_array = np.fliplr(img_array)
+    #     elif transpose_type == 'flipud':
+    #         print("Applying vertical flip")
+    #         img_array = np.flipud(img_array)
         
         # Visualize after transposition
-        if visualize:
-            try:
-                print(f"After {transpose_type}, shape: {img_array.shape}")
-                Image.fromarray((img_array * 255).astype(np.uint8)).show()
-            except Exception as e:
-                print(f"Error visualizing transposed image: {e}")
+        # if visualize:
+        #     try:
+        #         print(f"After {transpose_type}, shape: {img_array.shape}")
+        #         Image.fromarray((img_array * 255).astype(np.uint8)).show()
+        #     except Exception as e:
+        #         print(f"Error visualizing transposed image: {e}")
     
-    # Apply normalization
-    if normalization == 'simple':
-        # Simple [0,1] normalization
-        img_array = img_array / 255.0
-    elif normalization == 'imagenet':
-        # ImageNet normalization
-        if color_mode == 'RGB':
-            # ImageNet mean and std for RGB
-            mean = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape((1, 1, 3))
-            std = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape((1, 1, 3))
-            img_array = img_array / 255.0
-            img_array = (img_array - mean) / std
-        else:
-            # For grayscale, use average of RGB means/stds
-            mean = 0.449
-            std = 0.226
-            img_array = img_array / 255.0
-            img_array = (img_array - mean) / std
-    elif normalization == 'centered':
-        # Center to [-1, 1]
-        img_array = (img_array / 127.5) - 1.0
+    # # Apply normalization
+    # if normalization == 'simple':
+    #     # Simple [0,1] normalization
+    #     img_array = img_array / 255.0
+    # elif normalization == 'imagenet':
+    #     # ImageNet normalization
+    #     if color_mode == 'RGB':
+    #         # ImageNet mean and std for RGB
+    #         mean = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape((1, 1, 3))
+    #         std = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape((1, 1, 3))
+    #         img_array = img_array / 255.0
+    #         img_array = (img_array - mean) / std
+    #     else:
+    #         # For grayscale, use average of RGB means/stds
+    #         mean = 0.449
+    #         std = 0.226
+    #         img_array = img_array / 255.0
+    #         img_array = (img_array - mean) / std
+    # elif normalization == 'centered':
+    #     # Center to [-1, 1]
+    #     img_array = (img_array / 127.5) - 1.0
+    
+    # # Print normalized pixel values
+    # print("\n=== Normalized Image Pixel Values (Top-Left Corner) ===")
+    # print(img_array[0:5, 0:5])
     
     # Add dimensions based on color mode
     if color_mode == 'L':
@@ -525,6 +533,7 @@ def test_model_with_transpositions(model_path, image_path, expected_output_path)
 
 if __name__ == "__main__":
     model_path = "/Users/ewern/Downloads/modified_modified_12pm-squeezed_CanShoulderConds_fixed.onnx"
+    model_path = "/Users/ewern/Downloads/apr25-CanShoulderConds.onnx"
     image_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/Sample_Shoulder_Conds.jpg"
     expected_output_path = "/Users/ewern/Desktop/code/MetronMind/onnx-modifier/apr24/Shoulder_Conds_Output.txt"
     
